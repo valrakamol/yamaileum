@@ -80,30 +80,25 @@ def check_medicine_schedule(app):
                 notif_sent_today = Notification.query.filter(
                     Notification.message == pre_reminder_log,
                     db.func.date(Notification.created_at) == today,
-                    (Notification.user_id == elder.id) | (Notification.user_id.in_([m.id for m in elder.managers]))
+                    (Notification.user_id == elder.id)
                 ).first()
 
-                if not notif_sent_today:
-                    # ส่งหาผู้สูงอายุ
-                    if elder.email:
-                        send_email(
-                            subject=f"เตรียมตัวทานยาในอีก {reminder_before_min} นาที",
-                            recipients=[elder.email],
-                            text_body=f"สวัสดีคุณ {elder.first_name},\n\nในอีกประมาณ {reminder_before_min} นาที จะถึงเวลาทานยา '{med.name}' ({med.time_to_take} น.) กรุณาเตรียมตัวให้พร้อมนะคะ"
-                        )
-                        create_internal_notification(elder.id, pre_reminder_log)
+                if not notif_sent_today and elder.email:
+                    send_email(
+                        subject=f"เตรียมตัวทานยาในอีก {reminder_before_min} นาที",
+                        recipients=[elder.email],
+                        text_body=f"สวัสดีคุณ {elder.first_name},\n\nในอีกประมาณ {reminder_before_min} นาที จะถึงเวลาทานยา '{med.name}' ({med.time_to_take} น.) กรุณาเตรียมตัวให้พร้อมนะคะ"
+                    )
+                    create_internal_notification(elder.id, pre_reminder_log)
 
             # B. แจ้งเตือนเมื่อ "ถึงเวลาพอดี"
             if now.hour == med_datetime_today.hour and now.minute == med_datetime_today.minute:
-                # ส่งอีเมลหาผู้สูงอายุ
                 if elder.email:
                     send_email(
                         subject=f"🔔 ได้เวลาทานยา: {med.name}",
                         recipients=[elder.email],
                         text_body=f"สวัสดีคุณ {elder.first_name},\n\nถึงเวลาทานยา '{med.name}' แล้วค่ะ\nเวลา: {med.time_to_take} น."
                     )
-
-                # ส่งอีเมลหาผู้ดูแลและ อสม. ทุกคน
                 manager_emails = [manager.email for manager in elder.managers if manager.email]
                 if manager_emails:
                     send_email(
@@ -125,8 +120,6 @@ def check_medicine_schedule(app):
 
                 if not notif_sent_recently:
                     readable_time_passed = format_minutes_to_readable_time(int(minutes_passed))
-                    
-                    # ส่งหาผู้ดูแล
                     manager_emails = [manager.email for manager in elder.managers if manager.email]
                     if manager_emails:
                         send_email(
@@ -134,74 +127,120 @@ def check_medicine_schedule(app):
                             recipients=manager_emails,
                             text_body=f"แจ้งเตือน: คุณ {elder_name} ยังไม่กดยืนยันการทานยา '{med_info_str}' ซึ่งเลยเวลามาแล้วประมาณ {readable_time_passed}"
                         )
-                    
-                    # ส่งหาผู้สูงอายุ
                     if elder.email:
                         send_email(
                             subject=f"🚨 ลืมทานยา (เตือนซ้ำ): {med.name}",
                             recipients=[elder.email],
                             text_body=f"สวัสดีคุณ {elder.first_name},\n\nระบบตรวจพบว่าคุณอาจจะยังไม่ได้ทานยา '{med.name}' ของเวลา {med.time_to_take} น.\n\nกรุณาตรวจสอบและกดยืนยันในเว็บแอปพลิเคชันด้วยนะคะ"
                         )
-                    
                     for manager in elder.managers:
                         create_internal_notification(manager.id, reminder_message_log)
 
         db.session.commit()
 
 
-def check_appointment_reminder(app):
+def check_today_appointments(app):
     """
-    Job ที่ทำงานทุกวัน (ตอนเช้า) เพื่อส่งการแจ้งเตือนสำหรับนัดหมายใน "วันพรุ่งนี้" ผ่านอีเมล
+    Job ที่ทำงานทุก "นาที" เพื่อส่งการแจ้งเตือนสำหรับนัดหมายใน "วันนี้"
     """
     with app.app_context():
-        tomorrow = date.today() + timedelta(days=1)
+        now = datetime.now()
+        today = now.date()
         
-        appointments_tomorrow = Appointment.query.filter(
-            func.date(Appointment.appointment_datetime) == tomorrow
+        appointments_today = Appointment.query.filter(
+            func.date(Appointment.appointment_datetime) == today,
+            Appointment.status == 'pending'
         ).all()
 
-        print(f"Found {len(appointments_tomorrow)} appointments for tomorrow ({tomorrow}).")
+        for appt in appointments_today:
+            elder = appt.patient
+            elder_name = f"{elder.first_name} {elder.last_name}"
+            appt_datetime = appt.appointment_datetime
+            appt_time_str = appt_datetime.strftime('%H:%M น.')
+
+            # A. แจ้งเตือนเมื่อ "ถึงเวลาพอดี"
+            if now.hour == appt_datetime.hour and now.minute == appt_datetime.minute:
+                manager_emails = [m.email for m in elder.managers if m.email]
+                if manager_emails:
+                    send_email(
+                        subject=f"‼️ แจ้งเตือนนัดหมายวันนี้: {elder_name}",
+                        recipients=manager_emails,
+                        text_body=f"แจ้งเตือน: วันนี้คุณ {elder_name} มีนัดหมายเรื่อง '{appt.title}' เวลา {appt_time_str} ที่ {appt.location}"
+                    )
+                if elder.email:
+                    send_email(
+                        subject=f'‼️ ได้เวลานัดหมาย: {appt.title}',
+                        recipients=[elder.email],
+                        text_body=f"สวัสดีคุณ {elder.first_name},\n\nถึงเวลานัดหมายเรื่อง '{appt.title}' ของท่านแล้วค่ะ\nเวลา: {appt_time_str}\nสถานที่: {appt.location}"
+                    )
+
+            # B. แจ้งเตือนซ้ำ "ทุกๆ 1 ชั่วโมงหลังจากเลยเวลา"
+            minutes_passed = (now - appt_datetime).total_seconds() / 60
+            if minutes_passed > 0 and (int(minutes_passed) > 0) and (int(minutes_passed) % 60 == 0):
+                last_hour_start = now - timedelta(minutes=60)
+                reminder_log_missed = f"นัดหมายเลยเวลา (เตือนซ้ำ): {appt.title}"
+
+                notif_sent_recently = Notification.query.filter(
+                    Notification.message.like(f"%{reminder_log_missed}%"),
+                    Notification.created_at >= last_hour_start
+                ).first()
+
+                if not notif_sent_recently:
+                    readable_time_passed = format_minutes_to_readable_time(int(minutes_passed))
+                    manager_emails = [m.email for m in elder.managers if m.email]
+                    if manager_emails:
+                        send_email(
+                            subject=f"🚨 นัดหมายเลยเวลา (เตือนซ้ำ)! : {elder_name}",
+                            recipients=manager_emails,
+                            text_body=f"แจ้งเตือน: นัดหมายเรื่อง '{appt.title}' ของคุณ {elder_name} ได้เลยเวลามาแล้วประมาณ {readable_time_passed} และยังไม่ได้รับการยืนยัน"
+                        )
+                    for manager in elder.managers:
+                        create_internal_notification(manager.id, reminder_log_missed)
+        
+        db.session.commit()
+
+
+def check_tomorrow_appointments(app):
+    """
+    Job ที่ทำงานทุกวัน (ตอนเช้า) เพื่อส่งการแจ้งเตือนสำหรับนัดหมายใน "วันพรุ่งนี้"
+    """
+    with app.app_context():
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        
+        appointments_tomorrow = Appointment.query.filter(
+            func.date(Appointment.appointment_datetime) == tomorrow,
+            Appointment.status == 'pending'
+        ).all()
 
         for appt in appointments_tomorrow:
             elder = appt.patient
             elder_name = f"{elder.first_name} {elder.last_name}"
             appt_time_str = appt.appointment_datetime.strftime('%H:%M น.')
             
-            # ส่งอีเมลหาผู้ดูแลและ อสม. ทุกคน
             manager_emails = [manager.email for manager in elder.managers if manager.email]
             if manager_emails:
                 send_email(
                     subject=f"🗓️ แจ้งเตือนนัดหมายวันพรุ่งนี้ของ {elder_name}",
                     recipients=manager_emails,
-                    text_body=(
-                        f"แจ้งเตือน: คุณ {elder_name} มีนัดหมายในวันพรุ่งนี้\n\n"
-                        f"เรื่อง: {appt.title}\n"
-                        f"เวลา: {appt_time_str}\n"
-                        f"สถานที่: {appt.location}"
-                    )
+                    text_body=f"แจ้งเตือน: คุณ {elder_name} มีนัดหมายในวันพรุ่งนี้\n\nเรื่อง: {appt.title}\nเวลา: {appt_time_str}\nสถานที่: {appt.location}"
                 )
             
-            # ส่งอีเมลหาผู้สูงอายุ (ถ้ามี)
             if elder.email:
                 send_email(
                     subject=f'🗓️ แจ้งเตือนนัดหมายวันพรุ่งนี้: {appt.title}',
                     recipients=[elder.email],
-                    text_body=(
-                        f"สวัสดีคุณ {elder.first_name},\n\n"
-                        f"ขอแจ้งเตือนว่าท่านมีนัดหมายในวันพรุ่งนี้ ({tomorrow.strftime('%d/%m/%Y')})\n\n"
-                        f"เรื่อง: {appt.title}\n"
-                        f"เวลา: {appt_time_str}\n"
-                        f"สถานที่: {appt.location}\n\n"
-                        f"กรุณาเตรียมตัวล่วงหน้าค่ะ"
-                    )
+                    text_body=f"สวัสดีคุณ {elder.first_name},\n\nขอแจ้งเตือนว่าท่านมีนัดหมายในวันพรุ่งนี้ ({tomorrow.strftime('%d/%m/%Y')})\n\nเรื่อง: {appt.title}\nเวลา: {appt_time_str}\nสถานที่: {appt.location}\n\nกรุณาเตรียมตัวล่วงหน้าค่ะ"
                 )
-        db.session.commit() # Commit notification logs if any were created inside send_email
+        
+        db.session.commit()
 
 
 def init_scheduler(app):
     """สร้างและเริ่มการทำงานของ Scheduler"""
     scheduler = BackgroundScheduler(daemon=True)
     
+    # Job 1: เช็คเวลากินยา (ทำงานทุกนาที)
     scheduler.add_job(
         func=check_medicine_schedule, 
         args=[app], 
@@ -211,13 +250,24 @@ def init_scheduler(app):
         replace_existing=True
     )
     
+    # Job 2: เช็คนัดหมายของ "วันนี้" (ทำงานทุกนาที)
     scheduler.add_job(
-        func=check_appointment_reminder,
+        func=check_today_appointments,
+        args=[app],
+        trigger='interval',
+        minutes=1,
+        id='check_today_appointments_job',
+        replace_existing=True
+    )
+
+    # Job 3: เช็คนัดหมายล่วงหน้าของ "วันพรุ่งนี้" (ทำงานวันละครั้ง ตอน 7 โมงเช้า)
+    scheduler.add_job(
+        func=check_tomorrow_appointments,
         args=[app],
         trigger='cron',
         hour=7,
         minute=0,
-        id='check_appointment_reminder_job',
+        id='check_tomorrow_appointments_job',
         replace_existing=True
     )
 
