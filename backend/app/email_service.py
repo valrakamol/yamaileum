@@ -1,34 +1,30 @@
 # backend/app/email_service.py
-from flask_mail import Message
-from flask import current_app
-from .extensions import mail
+import os
 from threading import Thread
+from flask import current_app
+# --- เปลี่ยนมาใช้ SendGrid ---
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 
-def send_async_email(app, msg):
-    """ฟังก์ชันสำหรับส่งอีเมลใน background thread เพื่อไม่ให้แอปค้าง"""
+def send_async_email(app, message):
     with app.app_context():
         try:
-            mail.send(msg)
-            print(f"Successfully sent email: '{msg.subject}' to {msg.recipients}")
+            sendgrid_client = SendGridAPIClient(app.config['SENDGRID_API_KEY'])
+            response = sendgrid_client.send(message)
+            print(f"SendGrid response: {response.status_code}")
         except Exception as e:
-            print(f"Error sending async email to {msg.recipients}: {e}")
+            print(f"Error sending SendGrid email: {e}")
 
 def send_email(subject, recipients, text_body, html_body=None):
-    """ฟังก์ชันหลักสำหรับสร้างและส่งอีเมล"""
-    if not recipients:
-        return # ไม่ทำอะไรถ้าไม่มีผู้รับ
-
     if not isinstance(recipients, list):
         recipients = [recipients]
     
-    msg = Message(
-        subject,
-        sender=current_app.config['MAIL_DEFAULT_SENDER'],
-        recipients=recipients
-    )
-    msg.body = text_body
-    msg.html = html_body
+    # สร้าง Message object ของ SendGrid
+    message = Mail(
+        from_email=current_app.config['MAIL_DEFAULT_SENDER'],
+        to_emails=recipients,
+        subject=subject,
+        plain_text_content=text_body,
+        html_content=html_body)
 
-    # สร้าง Thread ใหม่เพื่อส่งอีเมล
-    app = current_app._get_current_object()
-    Thread(target=send_async_email, args=(app, msg)).start()
+    Thread(target=send_async_email, args=(current_app._get_current_object(), message)).start()
