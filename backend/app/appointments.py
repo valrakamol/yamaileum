@@ -19,14 +19,14 @@ def add_appointment():
     current_user_id = get_jwt_identity()
     caregiver = User.query.get(current_user_id)
 
-    if not caregiver or caregiver.role != 'caregiver':
+    if not caregiver or caregiver.role not in ['caregiver', 'osm']: # อนุญาตให้ อสม. เพิ่มได้ด้วย
         return jsonify(msg="Permission denied"), 403
 
     data = request.json
     elder_id = data.get('elder_id')
     title = data.get('title')
     location = data.get('location')
-    appointment_datetime_str = data.get('appointment_datetime') # Format: "YYYY-MM-DD HH:MM"
+    appointment_datetime_str = data.get('appointment_datetime')
 
     if not all([elder_id, title, location, appointment_datetime_str]):
         return jsonify(msg="Missing required fields"), 400
@@ -52,6 +52,45 @@ def add_appointment():
     db.session.add(new_appointment)
     db.session.commit()
     
+    # --- *** เพิ่ม Logic การแจ้งเตือนการสร้างนัดหมายใหม่ *** ---
+    try:
+        elder_name = f"{elder.first_name} {elder.last_name}"
+        creator_name = f"{caregiver.first_name} {caregiver.last_name}"
+        appt_datetime_str_formatted = appointment_dt.strftime('%d/%m/%Y เวลา %H:%M น.')
+
+        # ก. ส่งอีเมลหาผู้สูงอายุ (ถ้ามีอีเมล)
+        if elder.email:
+            subject_elder = f"🗓️ มีนัดหมายใหม่: {title}"
+            body_elder = (
+                f"สวัสดีคุณ {elder.first_name},\n\n"
+                f"ผู้ดูแล {creator_name} ได้เพิ่มนัดหมายใหม่ให้คุณ:\n\n"
+                f"เรื่อง: {title}\n"
+                f"วันที่: {appt_datetime_str_formatted}\n"
+                f"สถานที่: {location}\n\n" 
+                f"กรุณาตรวจสอบและเตรียมตัวค่ะ"
+            )
+            send_email(subject_elder, [elder.email], body_elder)
+
+        # ข. ส่งอีเมลหาผู้ดูแลคนอื่นๆ (ที่ไม่ใช่คนสร้างนัดหมายนี้)
+        other_managers_emails = [
+            manager.email for manager in elder.managers 
+            if manager.email and manager.id != current_user_id
+        ]
+        if other_managers_emails:
+            subject_manager = f"🗓️ มีนัดหมายใหม่สำหรับ {elder_name}"
+            body_manager = (
+                f"แจ้งเตือน: {creator_name} ได้เพิ่มนัดหมายใหม่ให้คุณ {elder_name}:\n\n"
+                f"เรื่อง: {title}\n"
+                f"วันที่: {appt_datetime_str_formatted}\n"
+                f"สถานที่: {location}"
+            )
+            send_email(subject_manager, other_managers_emails, body_manager)
+
+    except Exception as e:
+        # ป้องกันไม่ให้ Error จากการส่งอีเมล ทำให้ request ทั้งหมดล้มเหลว
+        print(f"Error sending appointment creation notification: {e}")
+    # --- จบส่วนการแจ้งเตือน ---
+
     return jsonify(msg="Appointment added successfully"), 201
 
 # --- Endpoint สำหรับผู้สูงอายุ ---
