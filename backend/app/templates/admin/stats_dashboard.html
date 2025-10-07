@@ -1,0 +1,182 @@
+{% extends 'admin/master.html' %}
+
+{% block head %}
+    {{ super() }}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-card {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+    </style>
+{% endblock %}
+
+{% block body %}
+  <h2>แดชบอร์ด: แสดงจำนวนผู้ใช้</h2>
+  
+  <div class="container-fluid">
+      <!-- ส่วนแสดงการ์ดสรุปข้อมูลผู้ใช้ -->
+      <div class="row" id="user-stats-row">
+          <div class="col-md-12 text-center">
+              <p>Loading user statistics...</p>
+          </div>
+      </div>
+
+      <hr>
+
+      <!-- ส่วนแสดงกราฟใหม่ -->
+      <div class="row">
+          
+          <!-- 1. กราฟวงกลม (Pie Chart / Doughnut Chart) -->
+          <div class="col-md-5">
+              <div class="chart-card">
+                  <canvas id="medicineFormChart"></canvas>
+              </div>
+          </div>
+
+          <!-- 2. กราฟแท่ง (Bar Chart) -->
+          <div class="col-md-7">
+              <div class="chart-card">
+                  <canvas id="appointmentsMonthChart"></canvas>
+              </div>
+          </div>
+
+      </div>
+  </div>
+
+  <script>
+    // --- ฟังก์ชันช่วยสำหรับสร้าง "การ์ด" สถิติ ---
+    function createUserStatCard(title, value, colorClass, link = null) {
+        const displayValue = (value === undefined) ? 'N/A' : value;
+        let linkHtml = link ? `<a href="${link}" class="btn btn-light btn-sm mt-2">View Details</a>` : '';
+        return `
+            <div class="col">
+                <div class="card text-white ${colorClass} mb-3">
+                    <div class="card-header">${title}</div>
+                    <div class="card-body">
+                        <h1 class="card-title">${displayValue}</h1>
+                        ${linkHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // --- ฟังก์ชันสำหรับสร้างสีสุ่มสำหรับกราฟวงกลม ---
+    function getRandomColors(numColors) {
+        const colors = [];
+        for (let i = 0; i < numColors; i++) {
+            const r = Math.floor(Math.random() * 220); // ลดค่าสีลงเล็กน้อยเพื่อไม่ให้สว่างเกินไป
+            const g = Math.floor(Math.random() * 220);
+            const b = Math.floor(Math.random() * 220);
+            colors.push(`rgba(${r}, ${g}, ${b}, 0.8)`);
+        }
+        return colors;
+    }
+
+
+    document.addEventListener('DOMContentLoaded', function() {
+        
+        // --- 1. โหลดข้อมูลสถิติผู้ใช้ ---
+        fetch('{{ url_for("admin_api.user_overview_stats") }}', { credentials: 'include' })
+            .then(response => {
+                if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                return response.json();
+            })
+            .then(stats => {
+                const statsRow = document.getElementById('user-stats-row');
+                statsRow.innerHTML = ''; // เคลียร์ "Loading..."
+                
+                // สร้างการ์ดแต่ละใบจากข้อมูลที่ได้รับ
+                statsRow.innerHTML += createUserStatCard('Total Users', stats.total, 'bg-primary');
+                statsRow.innerHTML += createUserStatCard('Caregivers', stats.caregiver, 'bg-info');
+                statsRow.innerHTML += createUserStatCard('OSM', stats.osm, 'bg-success');
+                statsRow.innerHTML += createUserStatCard('Elder', stats.elder, 'bg-danger');
+                
+                const pendingColor = stats.pending > 0 ? 'bg-warning' : 'bg-secondary';
+                const pendingLink = stats.pending > 0 ? '{{ url_for("admin_user.index_view") }}?flt0_8=pending' : null;
+                statsRow.innerHTML += createUserStatCard('Pending Approvals', stats.pending, pendingColor, pendingLink);
+            })
+            .catch(error => {
+                console.error('Error fetching user stats:', error);
+                document.getElementById('user-stats-row').innerHTML = `<p class="text-danger">Failed to load user stats.</p>`;
+            });
+
+        
+        // --- 2. โหลดข้อมูลและสร้างกราฟวงกลม ---
+        fetch('{{ url_for("admin_api.medicine_form_stats") }}', { credentials: 'include' })
+            .then(response => response.json())
+            .then(stats => {
+                if (stats.data && stats.data.length > 0) {
+                    const ctx = document.getElementById('medicineFormChart').getContext('2d');
+                    new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: stats.labels,
+                            datasets: [{
+                                label: 'จำนวน',
+                                data: stats.data,
+                                backgroundColor: getRandomColors(stats.labels.length),
+                                hoverOffset: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: { position: 'top' },
+                                title: { display: true, text: stats.title, font: { size: 16 } }
+                            }
+                        }
+                    });
+                } else {
+                     document.getElementById('medicineFormChart').parentElement.innerHTML = '<p class="text-center text-muted">ไม่มีข้อมูลรูปแบบยา</p>';
+                }
+            })
+            .catch(error => console.error('Error fetching medicine form stats:', error));
+
+            
+        // --- 3. โหลดข้อมูลและสร้างกราฟแท่ง ---
+        fetch('{{ url_for("admin_api.appointments_per_month_stats") }}', { credentials: 'include' })
+            .then(response => response.json())
+            .then(stats => {
+                // เช็คว่ามีข้อมูลอย่างน้อย 1 เดือนหรือไม่
+                if (stats.data && stats.data.some(d => d > 0)) { 
+                    const ctx = document.getElementById('appointmentsMonthChart').getContext('2d');
+                    new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: stats.labels,
+                            datasets: [{
+                                label: 'จำนวนนัดหมาย',
+                                data: stats.data,
+                                backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: { display: false },
+                                title: { display: true, text: stats.title, font: { size: 16 } }
+                            },
+                            scales: {
+                                y: { beginAtZero: true, ticks: { precision: 0 } }
+                            }
+                        }
+                    });
+                } else {
+                    document.getElementById('appointmentsMonthChart').parentElement.innerHTML = '<p class="text-center text-muted">ไม่มีข้อมูลนัดหมายในปีนี้</p>';
+                }
+            })
+            .catch(error => console.error('Error fetching appointments stats:', error));
+    });
+  </script>
+{% endblock %}

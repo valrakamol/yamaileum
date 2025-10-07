@@ -1,0 +1,7 @@
+{
+    "python.analysis.extraPaths": [
+        "./backend/migrations"
+    ],
+    "python-envs.pythonProjects": [],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
+}

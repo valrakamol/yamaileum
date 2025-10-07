@@ -1,0 +1,22 @@
+{# backend/app/templates/admin/master.html #}
+
+{% extends 'admin/base.html' %}
+
+{% block access_control %}
+  {% if current_user.is_authenticated %}
+    <div class="btn-group">
+      <a class="btn btn-primary dropdown-toggle" data-toggle="dropdown" href="#">
+          <i class="fa fa-user"></i> {{ current_user.username }} <span class="caret"></span>
+      </a>
+      <ul class="dropdown-menu">
+          <li>
+              <a href="{{ url_for('admin_auth.admin_logout') }}">Log out</a>
+          </li>
+      </ul>
+    </div>
+  {% else %}
+    <a href="{{ url_for('admin_auth.admin_login') }}" class="btn btn-primary">
+      <i class="fa fa-sign-in"></i> Log in
+    </a>
+  {% endif %}
+{% endblock %}
