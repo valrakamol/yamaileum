@@ -84,39 +84,33 @@ class UserAdminView(ProtectedAdminView):
 
     # 3. override on_model_change ให้ไม่มีการจัดการไฟล์
     def on_model_change(self, form, model, is_created):
-        """
-        ฟังก์ชันนี้จะถูกเรียกทุกครั้งที่กด Save ในฟอร์ม
-        """
-        # --- *** 1. เก็บสถานะเดิมไว้ก่อนที่จะมีการเปลี่ยนแปลง *** ---
-        # `get_history` จะบอกเราว่าค่าของ 'status' กำลังจะเปลี่ยนจากอะไรเป็นอะไร
-        status_history = db.session.get_history(model, 'status')
-        old_status = status_history.deleted[0] if status_history.deleted else None
-        new_status = status_history.added[0] if status_history.added else None
+        # --- 1. ตรวจสอบว่านี่เป็นการ Edit (ไม่ใช่ Create) ---
+        if not is_created:
+            # --- 2. ตรวจสอบการเปลี่ยนแปลงของ 'status' ---
+            # `model._sa_instance_state.committed_state` จะเก็บค่าของ object ก่อนที่จะถูกแก้ไข
+            old_status = model._sa_instance_state.committed_state.get('status', None)
+            new_status = form.status.data
+
+            # --- 3. Logic การส่งอีเมล (เหมือนเดิม) ---
+            if (old_status == 'pending' and new_status == 'active' and model.role == 'osm'):
+                if model.email:
+                    try:
+                        subject = "✅ บัญชี อสม. ของคุณได้รับการอนุมัติแล้ว"
+                        body = (
+                            f"สวัสดีคุณ {model.first_name},\n\n"
+                            f"บัญชี อสม. ของคุณในแอปพลิเคชัน 'ยาไม่ลืม' ได้รับการอนุมัติเรียบร้อยแล้ว\n"
+                            f"ตอนนี้คุณสามารถเข้าสู่ระบบเพื่อเริ่มใช้งานได้ทันที"
+                        )
+                        send_email(subject, [model.email], body)
+                        flash(f"ส่งอีเมลแจ้งเตือนการอนุมัติไปยัง {model.username} เรียบร้อยแล้ว", 'success')
+                    except Exception as e:
+                        flash(f"ไม่สามารถส่งอีเมลแจ้งเตือนได้: {e}", 'error')
         
-        # --- 2. จัดการรหัสผ่าน (เหมือนเดิม) ---
+        # --- 4. จัดการรหัสผ่าน (เหมือนเดิม) ---
         if form.password_new.data:
             model.set_password(form.password_new.data)
         elif is_created and not form.password_new.data:
             raise wtforms.validators.ValidationError('Password is required for new users.')
-        
-        # --- *** 3. เพิ่ม Logic การส่งอีเมลแจ้งเตือน *** ---
-        # ตรวจสอบว่าเป็นการ "อนุมัติ" บัญชี อสม. หรือไม่
-        # (เปลี่ยนจาก 'pending' เป็น 'active' และ role ต้องเป็น 'osm')
-        if (old_status == 'pending' and new_status == 'active' and model.role == 'osm'):
-            # ตรวจสอบว่าผู้ใช้มีอีเมลหรือไม่
-            if model.email:
-                try:
-                    subject = "✅ บัญชี อสม. ของคุณได้รับการอนุมัติแล้ว"
-                    body = (
-                        f"สวัสดีคุณ {model.first_name},\n\n"
-                        f"บัญชี อสม. ของคุณในแอปพลิเคชัน 'ยาไม่ลืม' ได้รับการอนุมัติเรียบร้อยแล้ว\n"
-                        f"ตอนนี้คุณสามารถเข้าสู่ระบบเพื่อเริ่มใช้งานได้ทันที\n\n"
-                        f"ขอขอบคุณ"
-                    )
-                    send_email(subject, [model.email], body)
-                    flash(f"ส่งอีเมลแจ้งเตือนการอนุมัติไปยัง {model.username} เรียบร้อยแล้ว", 'success')
-                except Exception as e:
-                    flash(f"ไม่สามารถส่งอีเมลแจ้งเตือนได้: {e}", 'error')
             
     # 4. (ทางเลือก) ทำให้ฟอร์ม Edit ง่ายขึ้น
     def edit_form(self, obj):
@@ -195,6 +189,9 @@ class AppointmentAdminView(ProtectedAdminView):
     
     # เพิ่ม Filter ด้านข้างสำหรับค้นหาตามผู้ป่วย
     column_filters = ('patient',)
+
+    can_create = False
+    can_edit = False
 
 # -----------------------------------------------------------------------------
 # View สำหรับจัดการ "HealthRecord" โดยเฉพาะ
