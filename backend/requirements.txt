@@ -66,3 +66,6 @@ Werkzeug==3.0.1
 WTForms==3.2.1
 zope.event==6.0
 zope.interface==8.0.1
+## The following requirements were added by pip freeze:
+python-http-client==3.3.7
+sendgrid==6.12.5
