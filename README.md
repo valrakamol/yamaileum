@@ -51,7 +51,7 @@ python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 
-## 🙏 ผู้พัฒนา
+### 🙏 ผู้พัฒนา
 โครงงานวิชาโปรเจกต์
 นางสาววรกมล คำแสนราช
 นักศึกษาชั้นปีที่ 4
